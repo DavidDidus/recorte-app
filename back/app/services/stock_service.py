@@ -167,7 +167,7 @@ def evaluar_producto_por_tipo(material, nombre, pedidos, stock_tipos, existe_mat
     if pedidos == 0:
         estado = "Sin demanda"
     elif not existe_material:
-        estado = "AVISO - Producto no existe en stock"
+        estado = "AVISO - Revisión manual requerida"
     elif faltante == 0 and asigna_externa > 0:
         estado = f"OK - Completa con bodega externa ({asigna_externa} cajas)"
     elif asigna_principal == pedidos:

@@ -182,9 +182,10 @@ export default function App() {
         {sheets.length > 0 && (
           <form onSubmit={handleCalcular} style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+
               <label style={{ display: "grid", gap: 6 }}>
                 <span>Hoja Stock</span>
-                <select value={hojaPedidos} onChange={(e) => setHojaPedidos(e.target.value)}>
+                <select value={hojaStock} onChange={(e) => setHojaStock(e.target.value)}>
                   <option value="">Selecciona...</option>
                   {sheets.map((s) => (
                     <option key={s} value={s}>
@@ -193,10 +194,10 @@ export default function App() {
                   ))}
                 </select>
               </label>
-
+              
               <label style={{ display: "grid", gap: 6 }}>
                 <span>Hoja Recorte</span>
-                <select value={hojaStock} onChange={(e) => setHojaStock(e.target.value)}>
+                <select value={hojaPedidos} onChange={(e) => setHojaPedidos(e.target.value)}>
                   <option value="">Selecciona...</option>
                   {sheets.map((s) => (
                     <option key={s} value={s}>
