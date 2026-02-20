@@ -30,3 +30,4 @@ def clasificar_centro(centro: int) -> str:
     elif centro_str.endswith("7"):
         return "bodega_externa"
     return "otros"
+

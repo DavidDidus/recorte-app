@@ -3,7 +3,7 @@ import pandas as pd
 
 from app.utils.excel import limpiar_columnas, encontrar_columna
 from app.utils.normalizers import normalizar_material, clasificar_centro
-from app.utils.matching import encontrar_material_en_stock
+from app.utils.matching import encontrar_material_en_stock,normalizar_sku_6,limpiar_sku_excel
 
 def preparar_pedidos(df_pedidos: pd.DataFrame) -> pd.DataFrame:
     df = limpiar_columnas(df_pedidos)
@@ -35,7 +35,7 @@ def preparar_pedidos(df_pedidos: pd.DataFrame) -> pd.DataFrame:
         rename_map[col_desc] = "NombreProducto"
     df = df.rename(columns=rename_map)
 
-    df["Producto"] = df["Producto"].apply(normalizar_material)
+    df["Producto"] = df["Producto"].apply(normalizar_sku_6)
     df["Cnt.Pedidos"] = pd.to_numeric(df["Cnt.Pedidos"], errors="coerce").fillna(0).astype(int)
 
     if "NombreProducto" not in df.columns:
@@ -79,9 +79,25 @@ def preparar_stock(df_stock: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
         rename_map[col_desc_stock] = "DescStock"
     df = df.rename(columns=rename_map)
 
-    df["Material"] = df["Material"].astype(str).str.strip()
+    print("Columnas detectadas:")
+    print("Material:", col_mat)
+    print("Centro:", col_cen)
+    print("Libre:", col_lib)
+    print("Desc:", col_desc_stock)
+
+    df["Material"] = df["Material"].apply(normalizar_sku_6)
     df["Centro"] = pd.to_numeric(df["Centro"], errors="coerce").astype("Int64")
-    df["Libre_utilizacion"] = pd.to_numeric(df["Libre_utilizacion"], errors="coerce").fillna(0)
+    df["Libre_utilizacion"] = (
+    df["Libre_utilizacion"]
+            .astype(str)
+            .str.replace(".", "", regex=False)  # quitar separador de miles
+            .str.replace(",", ".", regex=False) # si viniera coma decimal
+    )
+
+    df["Libre_utilizacion"] = pd.to_numeric(
+        df["Libre_utilizacion"], 
+        errors="coerce"
+    ).fillna(0)
 
     desc_map = {}
     if "DescStock" in df.columns:
@@ -93,11 +109,16 @@ def preparar_stock(df_stock: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
 
     df_stock_agg = df.groupby(["Material", "Centro"], as_index=False)["Libre_utilizacion"].sum()
 
+    df_stock_agg["Material"] = (
+        df_stock_agg["Material"]
+            .astype(str)
+            .str.strip()
+    )
     return df_stock_agg, desc_map
 
 def obtener_stock_por_tipo(df_stock: pd.DataFrame, material: str) -> dict:
     mat = str(material).strip()
-    filas = df_stock[df_stock["Material"] == mat]
+    filas = df_stock[df_stock["Material"].astype(str) == mat]
 
     if filas.empty:
         return {
@@ -157,7 +178,7 @@ def evaluar_producto_por_tipo(material, nombre, pedidos, stock_tipos, existe_mat
         estado = "NO - Stock insuficiente"
 
     return {
-        "Producto": normalizar_material(material),
+        "Producto": material,
         "NombreProducto": str(nombre),
         "Pedidos": pedidos,
         "Stock_Bodega_Principal": sp,
@@ -174,7 +195,12 @@ def procesar_validacion(df_pedidos_raw: pd.DataFrame, df_stock_raw: pd.DataFrame
     df_pedidos = preparar_pedidos(df_pedidos_raw)
     df_stock, desc_stock_map = preparar_stock(df_stock_raw)
 
-    materiales_stock = df_stock["Material"].astype(str).unique().tolist()
+    materiales_stock = set(
+        df_stock["Material"]
+        .apply(limpiar_sku_excel)
+        .astype(str)
+    )
+
 
     resultados = []
     for _, row in df_pedidos.iterrows():
@@ -202,7 +228,8 @@ def procesar_validacion(df_pedidos_raw: pd.DataFrame, df_stock_raw: pd.DataFrame
                 "Estado": "AVISO - No se encontró match confiable en stock",
             })
             continue
-
+        if material_match is not None:
+            material_match = str(material_match)
         stock_tipos = obtener_stock_por_tipo(df_stock, material_match)
         resultados.append(
             evaluar_producto_por_tipo(

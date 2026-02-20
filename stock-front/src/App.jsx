@@ -81,7 +81,8 @@ export default function App() {
       const form = new FormData();
       form.append("file", selectedFile);
 
-      const res = await fetch(`${API_BASE}/api/sheets`, {
+      const sheetsEndpoint = API_BASE ? `${API_BASE.replace(/\/$/, "")}/api/sheets` : `/api/sheets`;
+      const res = await fetch(sheetsEndpoint, {
         method: "POST",
         body: form,
       });
@@ -128,17 +129,18 @@ export default function App() {
       const form = new FormData();
       form.append("file", file);
 
-      const url = new URL(`${API_BASE}/api/validar-stock`);
-      url.searchParams.set("hoja_pedidos", hojaPedidos);
-      url.searchParams.set("hoja_stock", hojaStock);
+      // Build endpoint safely: use absolute API_BASE if provided, otherwise use relative path.
+      const endpoint = API_BASE ? `${API_BASE.replace(/\/$/, "")}/api/validar-stock` : `/api/validar-stock`;
+      const params = new URLSearchParams({ hoja_pedidos: hojaPedidos, hoja_stock: hojaStock });
 
-      const res = await fetch(url.toString(), {
+      const res = await fetch(`${endpoint}?${params.toString()}`, {
         method: "POST",
         body: form,
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || "Error calculando");
+      if (!res.ok) throw new Error(data?.detail || "Error al validar stock");
+
 
       const resultadosConEstadoBase = (data.resultados || []).map((r) => {
       const estado = r.Estado;
@@ -167,7 +169,7 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: 1100, margin: "40px auto", fontFamily: "system-ui" }}>
-      <h2>Validación de Stock</h2>
+      <h2>Calculo Recorte</h2>
 
       <div style={{ display: "grid", gap: 12 }}>
         <label style={{ display: "grid", gap: 6 }}>
@@ -181,7 +183,7 @@ export default function App() {
           <form onSubmit={handleCalcular} style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
               <label style={{ display: "grid", gap: 6 }}>
-                <span>Hoja Pedidos</span>
+                <span>Hoja Stock</span>
                 <select value={hojaPedidos} onChange={(e) => setHojaPedidos(e.target.value)}>
                   <option value="">Selecciona...</option>
                   {sheets.map((s) => (
@@ -193,7 +195,7 @@ export default function App() {
               </label>
 
               <label style={{ display: "grid", gap: 6 }}>
-                <span>Hoja Stock</span>
+                <span>Hoja Recorte</span>
                 <select value={hojaStock} onChange={(e) => setHojaStock(e.target.value)}>
                   <option value="">Selecciona...</option>
                   {sheets.map((s) => (
