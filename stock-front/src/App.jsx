@@ -17,7 +17,7 @@ export default function App() {
   const [filtroEstado, setFiltroEstado] = useState("Todos");
 
   const columnasFijas = useMemo(() => {
-  if (filtroEstado === "AVISO - No se encontró match confiable en stock") {
+  if (filtroEstado === "AVISO - Revisión manual requerida") {
     return [
       "Producto",
       "NombreProducto",

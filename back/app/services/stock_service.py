@@ -225,7 +225,7 @@ def procesar_validacion(df_pedidos_raw: pd.DataFrame, df_stock_raw: pd.DataFrame
                 "Asigna_2306": 0,
                 "Asigna_2307": 0,
                 "Faltante": int(pedidos),
-                "Estado": "AVISO - No se encontró match confiable en stock",
+                "Estado": "AVISO - Revisión manual requerida",
             })
             continue
         if material_match is not None:
