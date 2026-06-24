@@ -1,28 +1,25 @@
-from typing import Tuple, Dict
+# app/services/stock_service.py (o la ruta que uses)
+from typing import Tuple, List, Dict
 import pandas as pd
 
 from app.utils.excel import limpiar_columnas, encontrar_columna
-from app.utils.normalizers import normalizar_material, clasificar_centro
-from app.utils.matching import encontrar_material_en_stock,normalizar_sku_6,limpiar_sku_excel
+from app.utils.translator import traducir_codigo
+
+def clasificar_centro(centro) -> str:
+    """Clasificación integrada (antiguamente en normalizers.py)"""
+    centro_str = str(centro).strip()
+    if centro_str.endswith("6"):
+        return "bodega_principal"
+    elif centro_str.endswith("7"):
+        return "bodega_externa"
+    return "otros"
 
 def preparar_pedidos(df_pedidos: pd.DataFrame) -> pd.DataFrame:
     df = limpiar_columnas(df_pedidos)
 
-    col_prod = encontrar_columna(
-        df,
-        candidatos_exactos=("Producto",),
-        contiene=("producto", "material", "sku", "cod"),
-    )
-    col_cnt = encontrar_columna(
-        df,
-        candidatos_exactos=("Cnt.Pedidos", "Cnt Pedidos", "Cnt.Pedido", "Cantidad"),
-        contiene=("cnt", "pedido", "pedidos", "cantidad"),
-    )
-    col_desc = encontrar_columna(
-        df,
-        candidatos_exactos=("Desc.Reducida", "Desc Reducida", "Descripción", "Descripcion"),
-        contiene=("desc", "descrip", "nombre"),
-    )
+    col_prod = encontrar_columna(df, candidatos_exactos=("Producto",), contiene=("producto", "material", "sku", "cod"))
+    col_cnt = encontrar_columna(df, candidatos_exactos=("Cnt.Pedidos", "Cnt Pedidos", "Cnt.Pedido", "Cantidad"), contiene=("cnt", "pedido", "pedidos", "cantidad"))
+    col_desc = encontrar_columna(df, candidatos_exactos=("Desc.Reducida", "Desc Reducida", "Descripción", "Descripcion"), contiene=("desc", "descrip", "nombre"))
 
     if not col_prod or not col_cnt:
         raise KeyError(f"Pedidos: no encontré columnas. Columnas detectadas: {list(df.columns)}")
@@ -35,7 +32,8 @@ def preparar_pedidos(df_pedidos: pd.DataFrame) -> pd.DataFrame:
         rename_map[col_desc] = "NombreProducto"
     df = df.rename(columns=rename_map)
 
-    df["Producto"] = df["Producto"].apply(normalizar_sku_6)
+    # NUEVO: Convertir a string limpio quitando posibles decimales de Excel (.0)
+    df["Producto"] = df["Producto"].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
     df["Cnt.Pedidos"] = pd.to_numeric(df["Cnt.Pedidos"], errors="coerce").fillna(0).astype(int)
 
     if "NombreProducto" not in df.columns:
@@ -46,113 +44,58 @@ def preparar_pedidos(df_pedidos: pd.DataFrame) -> pd.DataFrame:
         s = s[s != ""]
         return s.iloc[0] if len(s) else ""
 
-    out = (
-        df.groupby("Producto", as_index=False)
-          .agg({"Cnt.Pedidos": "sum", "NombreProducto": first_non_empty})
-    )
+    out = df.groupby("Producto", as_index=False).agg({"Cnt.Pedidos": "sum", "NombreProducto": first_non_empty})
     return out
 
-def preparar_stock(df_stock: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
+def preparar_stock(df_stock: pd.DataFrame) -> pd.DataFrame:
     df = limpiar_columnas(df_stock)
 
     col_mat = encontrar_columna(df, candidatos_exactos=("Material",), contiene=("material", "producto", "sku", "cod"))
     col_cen = encontrar_columna(df, candidatos_exactos=("Centro",), contiene=("centro", "werks"))
-    col_lib = encontrar_columna(
-        df,
-        candidatos_exactos=("Libre utilización", "Libre utilizacion", "Libre utilización ", "Libre utilizacion "),
-        contiene=("libre", "utiliz", "dispon", "available"),
-    )
-    col_desc_stock = encontrar_columna(
-        df,
-        candidatos_exactos=("Texto breve material", "Texto breve de material", "Texto breve"),
-        contiene=("texto breve", "breve material", "descripcion", "descripción"),
-    )
+    col_lib = encontrar_columna(df, candidatos_exactos=("Libre utilización", "Libre utilizacion"), contiene=("libre", "utiliz", "dispon"))
 
     if not col_mat or not col_cen or not col_lib:
         raise KeyError(f"Stock: no encontré columnas. Columnas detectadas: {list(df.columns)}")
 
-    cols = [col_mat, col_cen, col_lib] + ([col_desc_stock] if col_desc_stock else [])
-    df = df[cols].copy()
+    df = df[[col_mat, col_cen, col_lib]].copy()
+    df = df.rename(columns={col_mat: "Material", col_cen: "Centro", col_lib: "Libre_utilizacion"})
 
-    rename_map = {col_mat: "Material", col_cen: "Centro", col_lib: "Libre_utilizacion"}
-    if col_desc_stock:
-        rename_map[col_desc_stock] = "DescStock"
-    df = df.rename(columns=rename_map)
+    # Traducir o estandarizar el material del Stock a su contraparte oficial en SAP usando el diccionario
+    # Esto asegura que si el stock viene con SKU Truck o SAP erróneo, se homologue al código SAP oficial
+    def homologar_a_sap(val):
+        val_str = str(val).strip().replace(".0", "")
+        traduccion = traducir_codigo(val_str)
+        return traduccion["sap"] if traduccion else val_str
 
-    print("Columnas detectadas:")
-    print("Material:", col_mat)
-    print("Centro:", col_cen)
-    print("Libre:", col_lib)
-    print("Desc:", col_desc_stock)
-
-    df["Material"] = df["Material"].apply(normalizar_sku_6)
+    df["Material"] = df["Material"].apply(homologar_a_sap)
     df["Centro"] = pd.to_numeric(df["Centro"], errors="coerce").astype("Int64")
-    df["Libre_utilizacion"] = (
-    df["Libre_utilizacion"]
-            .astype(str)
-            .str.replace(".", "", regex=False)  # quitar separador de miles
-            .str.replace(",", ".", regex=False) # si viniera coma decimal
-    )
+    
+    df["Libre_utilizacion"] = df["Libre_utilizacion"].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+    df["Libre_utilizacion"] = pd.to_numeric(df["Libre_utilizacion"], errors="coerce").fillna(0)
 
-    df["Libre_utilizacion"] = pd.to_numeric(
-        df["Libre_utilizacion"], 
-        errors="coerce"
-    ).fillna(0)
-
-    desc_map = {}
-    if "DescStock" in df.columns:
-        tmp = df[["Material", "DescStock"]].copy()
-        tmp["DescStock"] = tmp["DescStock"].astype(str).str.strip()
-        tmp = tmp[tmp["DescStock"] != ""]
-        for m, g in tmp.groupby("Material"):
-            desc_map[m] = g["DescStock"].iloc[0]
-
+    # Agrupar stock consolidado
     df_stock_agg = df.groupby(["Material", "Centro"], as_index=False)["Libre_utilizacion"].sum()
+    return df_stock_agg
 
-    df_stock_agg["Material"] = (
-        df_stock_agg["Material"]
-            .astype(str)
-            .str.strip()
-    )
-    return df_stock_agg, desc_map
-
-def obtener_stock_por_tipo(df_stock: pd.DataFrame, material: str) -> dict:
-    mat = str(material).strip()
-    filas = df_stock[df_stock["Material"].astype(str) == mat]
+def obtener_stock_por_tipo(df_stock: pd.DataFrame, material_sap: str) -> dict:
+    filas = df_stock[df_stock["Material"] == material_sap]
 
     if filas.empty:
-        return {
-            "bodega_principal": 0,
-            "bodega_externa": 0,
-            "otros": 0,
-            "detalle_centros": {},
-        }
+        return {"bodega_principal": 0, "bodega_externa": 0, "otros": 0, "detalle_centros": {}}
 
     detalle = {}
     for centro, stock in filas.groupby("Centro")["Libre_utilizacion"].sum().items():
-        if pd.isna(centro):
-            continue
+        if pd.isna(centro): continue
         detalle[str(int(centro))] = float(stock)
 
-    stock_principal = 0.0
-    stock_externa = 0.0
-    stock_otros = 0.0
-
+    sp = se = so = 0.0
     for centro, stock in detalle.items():
         tipo = clasificar_centro(centro)
-        if tipo == "bodega_principal":
-            stock_principal += stock
-        elif tipo == "bodega_externa":
-            stock_externa += stock
-        else:
-            stock_otros += stock
+        if tipo == "bodega_principal": sp += stock
+        elif tipo == "bodega_externa": se += stock
+        else: so += stock
 
-    return {
-        "bodega_principal": float(stock_principal),
-        "bodega_externa": float(stock_externa),
-        "otros": float(stock_otros),
-        "detalle_centros": detalle,
-    }
+    return {"bodega_principal": sp, "bodega_externa": se, "otros": so, "detalle_centros": detalle}
 
 def evaluar_producto_por_tipo(material, nombre, pedidos, stock_tipos, existe_material):
     pedidos = int(pedidos)
@@ -167,7 +110,7 @@ def evaluar_producto_por_tipo(material, nombre, pedidos, stock_tipos, existe_mat
     if pedidos == 0:
         estado = "Sin demanda"
     elif not existe_material:
-        estado = "AVISO - Revisión manual requerida"
+        estado = "AVISO - Código no existe en catálogo maestro"
     elif faltante == 0 and asigna_externa > 0:
         estado = f"OK - Completa con bodega externa ({asigna_externa} cajas)"
     elif asigna_principal == pedidos:
@@ -183,24 +126,15 @@ def evaluar_producto_por_tipo(material, nombre, pedidos, stock_tipos, existe_mat
         "Pedidos": pedidos,
         "Stock_Bodega_Principal": sp,
         "Stock_Bodega_Externa": se,
-        "Stock_Otros": float(stock_tipos["otros"]),
         "Asignado_Principal": asigna_principal,
         "Asignado_Externa": asigna_externa,
         "Faltante": faltante,
-        "DetalleCentros": stock_tipos["detalle_centros"],
         "Estado": estado,
     }
 
 def procesar_validacion(df_pedidos_raw: pd.DataFrame, df_stock_raw: pd.DataFrame):
     df_pedidos = preparar_pedidos(df_pedidos_raw)
-    df_stock, desc_stock_map = preparar_stock(df_stock_raw)
-
-    materiales_stock = set(
-        df_stock["Material"]
-        .apply(limpiar_sku_excel)
-        .astype(str)
-    )
-
+    df_stock = preparar_stock(df_stock_raw)
 
     resultados = []
     for _, row in df_pedidos.iterrows():
@@ -208,32 +142,31 @@ def procesar_validacion(df_pedidos_raw: pd.DataFrame, df_stock_raw: pd.DataFrame
         pedidos = int(row["Cnt.Pedidos"])
         nombre = row.get("NombreProducto", "")
 
-        material_match, _info = encontrar_material_en_stock(
-            material_pedido=material_pedido,
-            desc_pedido=nombre,
-            materiales_stock=materiales_stock,
-            desc_stock_por_material=desc_stock_map,
-        )
+        # NUEVO: Intentamos traducir el código de la orden de pedido
+        traduccion = traducir_codigo(material_pedido)
 
-        if material_match is None:
+        if not traduccion:
+            # Si el código no está en el JSON maestro
             resultados.append({
-                "Producto": normalizar_material(material_pedido),
+                "Producto": material_pedido,
                 "NombreProducto": str(nombre),
-                "Pedidos": int(pedidos),
-                "Stock_2306": 0,
-                "Stock_2307": 0,
-                "Asigna_2306": 0,
-                "Asigna_2307": 0,
-                "Faltante": int(pedidos),
-                "Estado": "AVISO - Revisión manual requerida",
+                "Pedidos": pedidos,
+                "Faltante": pedidos,
+                "Estado": "AVISO - Código no reconocido en traductor",
             })
             continue
-        if material_match is not None:
-            material_match = str(material_match)
-        stock_tipos = obtener_stock_por_tipo(df_stock, material_match)
+
+        # Usamos siempre la clave 'sap' unificada para contrastar contra el Dataframe de Stock
+        codigo_sap = traduccion["sap"]
+        # Si el pedido no traía descripción, usamos la del JSON maestro
+        if not nombre:
+            nombre = traduccion["descripcion"]
+
+        stock_tipos = obtener_stock_por_tipo(df_stock, codigo_sap)
+        
         resultados.append(
             evaluar_producto_por_tipo(
-                material=material_pedido,
+                material=material_pedido, # Mantiene el código original ingresado por el usuario
                 nombre=nombre,
                 pedidos=pedidos,
                 stock_tipos=stock_tipos,
