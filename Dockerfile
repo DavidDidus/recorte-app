@@ -18,7 +18,7 @@ RUN npm run build
 
 
 # Stage 2: runtime with Python backend
-FROM python:3.11-slim
+FROM python:3.11-slim-bullseye
 WORKDIR /app
 
 # Install python deps
